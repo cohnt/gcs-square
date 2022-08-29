@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon, Circle
 import cvxpy as cp
 from scipy.spatial import HalfspaceIntersection
+from shapely.geometry import LineString
 
 start = np.array([0.5, 0.1])
 goal = np.array([3.9, 3.9])
@@ -60,13 +61,16 @@ def compute_halfspace(A, b, d):
 	hs = HalfspaceIntersection(ineq, d, incremental=False)
 	return hs
 
-def draw_halfspace_rep(ax, halfspace_rep, color):
-	points = halfspace_rep.intersections
+def order_vertices(points):
 	center = np.mean(points, axis=0)
 	centered_points = points - center
 	thetas = np.arctan2(centered_points[:,1], centered_points[:,0])
 	idxs = np.argsort(thetas)
-	current_region = points[idxs]
+	return points[idxs]
+
+def draw_halfspace_rep(ax, halfspace_rep, color):
+	points = halfspace_rep.intersections
+	current_region = order_vertices(points)
 	ax.add_patch(Polygon(current_region, color=color, alpha=0.25))
 	plt.plot(current_region[:,0], current_region[:,1], color=color, alpha=0.75)
 	plt.plot(current_region[[0,-1],0], current_region[[0,-1],1], color=color, alpha=0.75)
@@ -175,7 +179,39 @@ def solve_iris_region(seed_point):
 	print("Done")
 	return As[-1], bs[-1], Cs[-1], ds[-1]
 
+def point_inside_region(point, region):
+	#
+	return not np.any(region.halfspaces @ np.hstack((point, 1)) > 0)
+
+def do_regions_intersect(region1, region2):
+	points1 = order_vertices(region1.intersections)
+	points2 = order_vertices(region2.intersections)
+	for i in range(len(points1)):
+		for j in range(len(points2)):
+			if edge_edge_intersection(points1[[i, (i+1) % len(points1)]], points2[[j, (j+1) % len(points2)]]):
+				return True
+	return False
+
+def edge_edge_intersection(edge1, edge2):
+	l1 = LineString(edge1)
+	l2 = LineString(edge2)
+	return not l1.intersection(l2).is_empty
+
+def construct_gcs_adj_mat(regions):
+	foo = 2 + len(region_tuples)
+	adj_mat = np.zeros((foo, foo))
+	start_idx = len(regions)
+	goal_idx = len(regions) + 1
+	for i in range(len(regions)):
+		adj_mat[i,start_idx] = adj_mat[start_idx,i] = point_inside_region(start, regions[i])
+		adj_mat[i,goal_idx] = adj_mat[goal_idx,i] = point_inside_region(goal, regions[i])
+		for j in range(i+1, len(regions)):
+			adj_mat[i,j] = adj_mat[j,i] = do_regions_intersect(regions[i], regions[j])
+	return adj_mat
+
 region_tuples = [solve_iris_region(seed_point) for seed_point in iris_seed_points]
 halfspace_reps = [compute_halfspace(A, b, d) for A, b, _, d, in region_tuples]
+
+adj_mat = construct_gcs_adj_mat(halfspace_reps)
 
 draw_output([], halfspace_reps)
