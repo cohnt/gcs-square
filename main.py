@@ -33,7 +33,7 @@ iris_seed_points = np.array([
 tolerance = 0.00001
 max_iters = 10
 
-def draw_output(shortest_path, region_tuples):
+def draw_output(shortest_path, halfspace_reps):
 	fig, ax = plt.subplots()
 	ax.set_xlim(world_bounds[0])
 	ax.set_ylim(world_bounds[1])
@@ -48,20 +48,22 @@ def draw_output(shortest_path, region_tuples):
 		shortest_path = np.asarray(shortest_path)
 		ax.plot(np.asarray(shortest_path)[:,0], np.asarray(shortest_path)[:,1])
 
-	for idx, region_tuple in enumerate(region_tuples):
-		A, b, _, d = region_tuple
+	for idx, halfspace_rep in enumerate(halfspace_reps):
 		color = plt.get_cmap("Set3")(float(idx) / 12.)
-		draw_intersection(ax, A, b, d, color=color)
+		draw_halfspace_rep(ax, halfspace_rep, color=color)
 		
 	ax.set_aspect("equal")
 	plt.show()
 
-def draw_intersection(ax, A, b, d, color):
-	global current_region
+def compute_halfspace(A, b, d):
 	ineq = np.hstack((A.T, -b))
 	hs = HalfspaceIntersection(ineq, d, incremental=False)
-	points = hs.intersections
-	centered_points = points - d
+	return hs
+
+def draw_halfspace_rep(ax, halfspace_rep, color):
+	points = halfspace_rep.intersections
+	center = np.mean(points, axis=0)
+	centered_points = points - center
 	thetas = np.arctan2(centered_points[:,1], centered_points[:,0])
 	idxs = np.argsort(thetas)
 	current_region = points[idxs]
@@ -174,5 +176,6 @@ def solve_iris_region(seed_point):
 	return As[-1], bs[-1], Cs[-1], ds[-1]
 
 region_tuples = [solve_iris_region(seed_point) for seed_point in iris_seed_points]
+halfspace_reps = [compute_halfspace(A, b, d) for A, b, _, d, in region_tuples]
 
-draw_output([], region_tuples)
+draw_output([], halfspace_reps)
