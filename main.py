@@ -34,7 +34,7 @@ iris_seed_points = np.array([
 tolerance = 0.00001
 max_iters = 10
 
-def draw_output(shortest_path, halfspace_reps):
+def draw_output(shortest_path, halfspace_reps, adj_mat):
 	fig, ax = plt.subplots()
 	ax.set_xlim(world_bounds[0])
 	ax.set_ylim(world_bounds[1])
@@ -52,6 +52,17 @@ def draw_output(shortest_path, halfspace_reps):
 	for idx, halfspace_rep in enumerate(halfspace_reps):
 		color = plt.get_cmap("Set3")(float(idx) / 12.)
 		draw_halfspace_rep(ax, halfspace_rep, color=color)
+
+	start_idx = len(halfspace_reps)
+	goal_idx = len(halfspace_reps) + 1
+	for i in range(len(halfspace_reps)):
+		for j in range(i, len(halfspace_reps)):
+			if adj_mat[i,j]:
+				plt.plot(iris_seed_points[[i,j],0], iris_seed_points[[i,j],1], color="black", linestyle="dashed")
+		if adj_mat[i,start_idx]:
+			plt.plot([iris_seed_points[i,0],start[0]], [iris_seed_points[i,1],start[1]], color="black", linestyle="dashed")
+		if adj_mat[i,goal_idx]:
+			plt.plot([iris_seed_points[i,0],goal[0]], [iris_seed_points[i,1],goal[1]], color="black", linestyle="dashed")
 		
 	ax.set_aspect("equal")
 	plt.show()
@@ -214,4 +225,4 @@ halfspace_reps = [compute_halfspace(A, b, d) for A, b, _, d, in region_tuples]
 
 adj_mat = construct_gcs_adj_mat(halfspace_reps)
 
-draw_output([], halfspace_reps)
+draw_output([], halfspace_reps, adj_mat)
