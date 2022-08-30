@@ -221,7 +221,7 @@ def construct_gcs_adj_mat(regions):
 			adj_mat[i,j] = adj_mat[j,i] = do_regions_intersect(regions[i], regions[j])
 	return adj_mat
 
-def find_point_in_intersection(region1, region2):
+def create_gcs_region(region1, region2):
 	# See: https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.HalfspaceIntersection.html
 	halfspaces = np.vstack((region1.halfspaces, region2.halfspaces))
 	norm_vector = np.reshape(np.linalg.norm(halfspaces[:, :-1], axis=1), (halfspaces.shape[0], 1))
@@ -232,12 +232,20 @@ def find_point_in_intersection(region1, region2):
 	res = linprog(c, A_ub=A, b_ub=b, bounds=(None, None))
 	x = res.x[:-1]
 	y = res.x[-1]
-	return x
+	new_halfspace = HalfspaceIntersection(halfspaces, x, incremental=False)
+	return new_halfspace # Maybe also return x?
+
+def construct_gcs_regions(adj_mat, halfspace_reps):
+	gcs_regions = dict()
+	for i in range(len(halfspace_reps)):
+		for j in range(i, len(halfspace_reps)):
+			if adj_mat[i,j]:
+				gcs_regions[(i,j)] = create_gcs_region(halfspace_reps[i], halfspace_reps[j])
 
 region_tuples = [solve_iris_region(seed_point) for seed_point in iris_seed_points]
 halfspace_reps = [compute_halfspace(A, b, d) for A, b, _, d, in region_tuples]
 
 adj_mat = construct_gcs_adj_mat(halfspace_reps)
-find_point_in_intersection(halfspace_reps[0], halfspace_reps[1])
+gcs_regions = construct_gcs_regions(adj_mat, halfspace_reps)
 
 draw_output([], halfspace_reps, adj_mat)
