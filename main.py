@@ -4,6 +4,7 @@ from matplotlib.patches import Polygon, Circle
 import cvxpy as cp
 from scipy.spatial import HalfspaceIntersection
 from shapely.geometry import LineString
+from scipy.optimize import linprog
 
 start = np.array([0.5, 0.1])
 goal = np.array([3.9, 3.9])
@@ -220,9 +221,23 @@ def construct_gcs_adj_mat(regions):
 			adj_mat[i,j] = adj_mat[j,i] = do_regions_intersect(regions[i], regions[j])
 	return adj_mat
 
+def find_point_in_intersection(region1, region2):
+	# See: https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.HalfspaceIntersection.html
+	halfspaces = np.vstack((region1.halfspaces, region2.halfspaces))
+	norm_vector = np.reshape(np.linalg.norm(halfspaces[:, :-1], axis=1), (halfspaces.shape[0], 1))
+	c = np.zeros((halfspaces.shape[1],))
+	c[-1] = -1
+	A = np.hstack((halfspaces[:, :-1], norm_vector))
+	b = - halfspaces[:, -1:]
+	res = linprog(c, A_ub=A, b_ub=b, bounds=(None, None))
+	x = res.x[:-1]
+	y = res.x[-1]
+	return x
+
 region_tuples = [solve_iris_region(seed_point) for seed_point in iris_seed_points]
 halfspace_reps = [compute_halfspace(A, b, d) for A, b, _, d, in region_tuples]
 
 adj_mat = construct_gcs_adj_mat(halfspace_reps)
+find_point_in_intersection(halfspace_reps[0], halfspace_reps[1])
 
 draw_output([], halfspace_reps, adj_mat)
