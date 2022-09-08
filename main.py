@@ -35,7 +35,7 @@ iris_seed_points = np.array([
 tolerance = 0.00001
 max_iters = 10
 
-np.random.seed(7)
+np.random.seed(10)
 iris_seed_points = np.random.rand(4, 2)
 iris_seed_points[:,0] = iris_seed_points[:,0] * world_bounds[0,1]
 iris_seed_points[:,1] = iris_seed_points[:,1] * world_bounds[1,1]
@@ -434,26 +434,27 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 		print("Problem is infeasible!")
 		return []
 
-	print("Final edge flows:")
-	for edge in phi_vars.keys():
-		print(str(edge) + "\t" + str(phi_vars[edge].value))
+	# print("Final edge flows:")
+	# for edge in phi_vars.keys():
+	# 	print(str(edge) + "\t" + str(phi_vars[edge].value))
 
-	print("Final vertex flows:")
-	for vertex in range(len(adj_mat)):
-		print(str(vertex) + "\tin: " + str(v_in_flows[vertex].value) + "\tout: " + str(v_out_flows[vertex].value))
+	# print("Final vertex flows:")
+	# for vertex in range(len(adj_mat)):
+	# 	print(str(vertex) + "\tin: " + str(v_in_flows[vertex].value) + "\tout: " + str(v_out_flows[vertex].value))
 
 	# Reconstruct the x variables
 	x = np.zeros((len(adj_mat),2))
 	out_idxs = np.nonzero(adj_mat[start_idx,:])[0]
-	xs = np.sum([y_vars[(start_idx,out_idx)].value for out_idx in out_idxs], axis=0)
-	x[-2] = xs
-	in_idxs = np.nonzero(adj_mat[:,goal_idx])[0]
-	xt = np.sum([z_vars[(in_idx,goal_idx)].value for in_idx in in_idxs], axis=0)
-	x[-1] = xt
-
-	for v in range(len(adj_mat)-2):
+	
+	for v in range(len(adj_mat)):
 		out_idxs = np.nonzero(adj_mat[v,:])[0]
-		x[v] = np.sum([y_vars[(v,out_idx)].value for out_idx in out_idxs], axis=0)
+		in_idxs = np.nonzero(adj_mat[:,goal_idx])[0]
+		if v == start_idx:
+			x[v] = np.sum([y_vars[(start_idx,out_idx)].value for out_idx in out_idxs], axis=0)
+		elif v == goal_idx:
+			x[v] = np.sum([z_vars[(in_idx,goal_idx)].value for in_idx in in_idxs], axis=0)
+		else:
+			x[v] = np.sum([y_vars[(v,out_idx)].value for out_idx in out_idxs], axis=0)
 
 	# print("Final vertex positions")
 	# for v in range(len(x)):
@@ -471,13 +472,10 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 		adj_weights = np.array([phi_vars[(curr_idx,adj_vert)].value for adj_vert in adj_verts])
 		adj_verts_sorted = adj_verts[np.argsort(-adj_weights)]
 		adj_verts_open = np.array([adj_vert not in visited_idx for adj_vert in adj_verts_sorted])
-		print(adj_verts)
-		print(adj_weights)
 		if np.sum(adj_verts_open) == 0:
 			shortest_path_idx.pop()
 		else:
 			next_idx = adj_verts_sorted[np.nonzero(adj_verts_open)[0][0]]
-			print(next_idx)
 			shortest_path_idx.append(next_idx)
 			visited_idx.add(next_idx)
 
