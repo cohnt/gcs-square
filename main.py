@@ -35,8 +35,12 @@ iris_seed_points = np.array([
 tolerance = 0.00001
 max_iters = 10
 
-# def draw_output(shortest_path, halfspace_reps, adj_mat):
-def draw_output(shortest_path, gcs_regions, region_points, conjugate_graph):
+np.random.seed(7)
+iris_seed_points = np.random.rand(4, 2)
+iris_seed_points[:,0] = iris_seed_points[:,0] * world_bounds[0,1]
+iris_seed_points[:,1] = iris_seed_points[:,1] * world_bounds[1,1]
+
+def draw_output_iris(iris_regions):
 	fig, ax = plt.subplots()
 	ax.set_xlim(world_bounds[0])
 	ax.set_ylim(world_bounds[1])
@@ -45,12 +49,26 @@ def draw_output(shortest_path, gcs_regions, region_points, conjugate_graph):
 	ax.add_patch(Circle(start, radius=0.1, color="green"))
 	ax.add_patch(Circle(goal, radius=0.1, color="blue"))
 
-	ax.scatter(region_points[:,0], region_points[:,1], color="black")
+	ax.scatter(iris_seed_points[:,0], iris_seed_points[:,1], color="grey")
 
-	if len(shortest_path) > 0:
-		shortest_path = np.asarray(shortest_path)
-		ax.plot(shortest_path[:,0], shortest_path[:,1])
-		ax.scatter(shortest_path[:,0], shortest_path[:,1])
+	for idx, halfspace_rep in enumerate(iris_regions):
+		if halfspace_rep == "start" or halfspace_rep == "goal":
+			continue
+		color = plt.get_cmap("Set3")(float(idx) / 12.)
+		draw_halfspace_rep(ax, halfspace_rep, color=color)
+
+	ax.set_aspect("equal")
+	ax.set_title("IRIS Regions")
+	plt.show()
+
+def draw_output_gcs(shortest_path, gcs_regions, region_points, conjugate_graph):
+	fig, ax = plt.subplots()
+	ax.set_xlim(world_bounds[0])
+	ax.set_ylim(world_bounds[1])
+
+	ax.add_patch(Polygon(obstacle, color="red"))
+	ax.add_patch(Circle(start, radius=0.1, color="green"))
+	ax.add_patch(Circle(goal, radius=0.1, color="blue"))
 
 	for idx, halfspace_rep in enumerate(gcs_regions):
 		if halfspace_rep == "start" or halfspace_rep == "goal":
@@ -58,13 +76,20 @@ def draw_output(shortest_path, gcs_regions, region_points, conjugate_graph):
 		color = plt.get_cmap("Set3")(float(idx) / 12.)
 		draw_halfspace_rep(ax, halfspace_rep, color=color)
 
+	ax.scatter(region_points[:,0], region_points[:,1], color="grey")
 	for i in range(conjugate_graph.shape[0]):
 		for j in range(i, conjugate_graph.shape[1]):
 			if conjugate_graph[i,j]:
-				ax.plot(region_points[[i,j],0], region_points[[i,j],1], color="black", linestyle="dashed")
-		ax.text(region_points[i,0]-.2, region_points[i,1], str(i))
+				ax.plot(region_points[[i,j],0], region_points[[i,j],1], color="grey", linestyle="dashed")
+		ax.text(region_points[i,0]-.2, region_points[i,1], str(i), color="grey")
+	
+	if len(shortest_path) > 0:
+		shortest_path = np.asarray(shortest_path)
+		ax.plot(shortest_path[:,0], shortest_path[:,1], color="black", lw=2)
+		ax.scatter(shortest_path[:,0], shortest_path[:,1], color="black", lw=2)
 		
 	ax.set_aspect("equal")
+	ax.set_title("GCS Solution")
 	plt.show()
 
 def compute_halfspace(A, b, d):
@@ -446,22 +471,32 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 		adj_weights = np.array([phi_vars[(curr_idx,adj_vert)].value for adj_vert in adj_verts])
 		adj_verts_sorted = adj_verts[np.argsort(-adj_weights)]
 		adj_verts_open = np.array([adj_vert not in visited_idx for adj_vert in adj_verts_sorted])
+		print(adj_verts)
+		print(adj_weights)
 		if np.sum(adj_verts_open) == 0:
-			print("Error, no path found!")
-			print("You should never reach this point!")
-			exit(1)
-		next_idx = adj_verts_sorted[np.nonzero(adj_verts_open)[0][0]]
-		shortest_path_idx.append(next_idx)
-		visited_idx.add(next_idx)
+			shortest_path_idx.pop()
+		else:
+			next_idx = adj_verts_sorted[np.nonzero(adj_verts_open)[0][0]]
+			print(next_idx)
+			shortest_path_idx.append(next_idx)
+			visited_idx.add(next_idx)
 
 	shortest_path = [x[idx] for idx in shortest_path_idx]
 	return shortest_path
 
+print("Constructing IRIS regions")
 region_tuples = [solve_iris_region(seed_point) for seed_point in iris_seed_points]
+
+print("Computing IRIS region halfspace representations")
 halfspace_reps = [compute_halfspace(A, b, d) for A, b, _, d, in region_tuples]
 
+draw_output_iris(halfspace_reps)
+
+print("Constructing overlap graph")
 overlap_adj_mat = construct_overlap_adj_mat(halfspace_reps)
+print("Constructing overlap regions and conjugate graph")
 gcs_regions, region_points, gcs_regions_idx_dict, conjugate_graph = construct_gcs_regions(overlap_adj_mat, halfspace_reps)
+print("Solving GCS")
 shortest_path = solve_gcs_rounding(gcs_regions, conjugate_graph)
 
-draw_output(shortest_path, gcs_regions, region_points, conjugate_graph)
+draw_output_gcs(shortest_path, gcs_regions, region_points, conjugate_graph)
