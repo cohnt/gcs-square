@@ -59,11 +59,14 @@ def draw_output(shortest_path, halfspace_reps, adj_mat):
 	for i in range(len(halfspace_reps)):
 		for j in range(i, len(halfspace_reps)):
 			if adj_mat[i,j]:
-				plt.plot(iris_seed_points[[i,j],0], iris_seed_points[[i,j],1], color="black", linestyle="dashed")
+				ax.plot(iris_seed_points[[i,j],0], iris_seed_points[[i,j],1], color="black", linestyle="dashed")
 		if adj_mat[i,start_idx]:
-			plt.plot([iris_seed_points[i,0],start[0]], [iris_seed_points[i,1],start[1]], color="black", linestyle="dashed")
+			ax.plot([iris_seed_points[i,0],start[0]], [iris_seed_points[i,1],start[1]], color="black", linestyle="dashed")
 		if adj_mat[i,goal_idx]:
-			plt.plot([iris_seed_points[i,0],goal[0]], [iris_seed_points[i,1],goal[1]], color="black", linestyle="dashed")
+			ax.plot([iris_seed_points[i,0],goal[0]], [iris_seed_points[i,1],goal[1]], color="black", linestyle="dashed")
+		ax.text(iris_seed_points[i,0]-.2, iris_seed_points[i,1]+.1, str(i))
+	ax.text(start[0]-.2, start[1]+.1, str(start_idx))
+	ax.text(goal[0]-.2, goal[1]+.1, str(goal_idx))
 		
 	ax.set_aspect("equal")
 	plt.show()
@@ -153,7 +156,7 @@ def InscribedEllipsoid(A, b):
 	return C.value, d.value
 
 def solve_iris_region(seed_point):
-	print("Growing convex region for seed point %s" % seed_point)
+	# print("Growing convex region for seed point %s" % seed_point)
 	As = []
 	bs = []
 	Cs = []
@@ -188,7 +191,7 @@ def solve_iris_region(seed_point):
 		if iters > max_iters:
 			break
 
-	print("Done")
+	# print("Done")
 	return As[-1], bs[-1], Cs[-1], ds[-1]
 
 def point_inside_region(point, region):
@@ -235,17 +238,177 @@ def create_gcs_region(region1, region2):
 	new_halfspace = HalfspaceIntersection(halfspaces, x, incremental=False)
 	return new_halfspace # Maybe also return x?
 
-def construct_gcs_regions(adj_mat, halfspace_reps):
-	gcs_regions = dict()
-	for i in range(len(halfspace_reps)):
-		for j in range(i, len(halfspace_reps)):
+# def construct_gcs_regions(adj_mat, halfspace_reps):
+# 	gcs_regions = dict()
+# 	for i in range(len(halfspace_reps)):
+# 		for j in range(i, len(halfspace_reps)):
+# 			if adj_mat[i,j]:
+# 				gcs_regions[(i,j)] = gcs_regions[(j,i)] = create_gcs_region(halfspace_reps[i], halfspace_reps[j])
+
+# 	# Create gcs regions for start and end points
+# 	start_idx = len(adj_mat) - 2
+# 	start_containing_idx = np.nonzero(adj_mat[start_idx])[0][0]
+# 	gcs_regions[(start_idx,start_containing_idx)] = gcs_regions[(start_containing_idx,start_idx)] = create_gcs_region(halfspace_reps[start_containing_idx], halfspace_reps[start_containing_idx])
+# 	goal_idx = len(adj_mat) - 1
+# 	goal_containing_idx = np.nonzero(adj_mat[goal_idx])[0][0]
+# 	gcs_regions[(goal_idx,goal_containing_idx)] = gcs_regions[(goal_containing_idx,goal_idx)] = create_gcs_region(halfspace_reps[goal_containing_idx], halfspace_reps[goal_containing_idx])
+
+# 	return gcs_regions
+
+def solve_gcs_rounding(adj_mat, gcs_regions):
+	# Set up dictionaries to hold all of the variables in an organized fashion
+	y_vars = dict() # One R^2 variable for each edge (u,v)
+	z_vars = dict() # One R^2 variable for each edge (u,v)
+	phi_vars = dict() # One [0,1] variable for each edge (u,v)
+	l_vars = dict() # One non-negative slack variable for each edge (u,v)
+
+	start_idx = len(adj_mat) - 2
+	goal_idx = len(adj_mat) - 1
+
+	# Create all of the decision variables
+	for i in range(len(adj_mat)):
+		for j in range(len(adj_mat)):
 			if adj_mat[i,j]:
-				gcs_regions[(i,j)] = create_gcs_region(halfspace_reps[i], halfspace_reps[j])
+				y_vars[(i,j)] = cp.Variable(2)
+				z_vars[(i,j)] = cp.Variable(2)
+				phi_vars[(i,j)] = cp.Variable()
+				l_vars[(i,j)] = cp.Variable()
+
+	constraints = []
+	objective = 0
+
+	# Construct the objective function
+	for edge, l_var in l_vars.items():
+		#
+		objective += l_var # The l slack variables are used with the Euclidean perspective function (GCS 1, Page 16)
+
+	# Slack variable constraints
+	# (GCS 1, Page 16)
+	for l_var in l_vars.values():
+		#
+		constraints += [l_var >= 0]
+
+	# Second Order Cone Constraints
+	# (GCS 1, Page 16, EQ 23) *but using the norm, not the squared norm
+	for edge in y_vars.keys():
+		y = y_vars[edge]
+		z = z_vars[edge]
+		phi = phi_vars[edge]
+		l = l_vars[edge]
+		constraints += [cp.SOC(l, y-z)] # Note: the extra phi_e doesn't appear on the LHS, because the norm isn't squared
+		                                # I don't remember exactly why, but Mark says so, and I trust Mark
+
+	# Set Membership Constraints
+	# (GCS 1, Page 15, EQ 21b)
+	for edge in y_vars.keys():
+		y = y_vars[edge]
+		z = z_vars[edge]
+		phi = phi_vars[edge]
+
+		# For all of these cases, use the singleton set special case
+		# (GCS 1, Page 17, 6.2.1)
+		if edge[0] == start_idx:
+			constraints += [y == phi * start]
+		elif edge[0] == goal_idx:
+			constraints += [y == phi * goal]
+		else:
+			# General case (GCS 1, Page 18, 6.2.2)
+			A = gcs_regions[edge[0]].halfspaces[:,:-1]
+			b = -gcs_regions[edge[0]].halfspaces[:,-1]
+			constraints += [A @ y <= b * phi]
+
+		if edge[1] == start_idx:
+			constraints += [z == phi * start]
+		elif edge[1] == goal_idx:
+			constraints += [z == phi * goal]
+		else:
+			# General case (GCS 1, Page 18, 6.2.2)
+			A = gcs_regions[edge[1]].halfspaces[:,:-1]
+			b = -gcs_regions[edge[1]].halfspaces[:,-1]
+			constraints += [A @ z <= b * phi]
+
+	# Regular Conservation of Flow
+	# (GCS 1, Page 15, EQ 21c)
+	v_in_flows = dict()
+	v_out_flows = dict()
+	for vertex in range(len(adj_mat)):
+		# By convention, row denotes source vertex and column denotes target vertex for directed edges
+		in_idxs = np.nonzero(adj_mat[:,vertex])[0]
+		out_idxs = np.nonzero(adj_mat[vertex,:])[0]
+		in_offset = 1 if vertex == start_idx else 0
+		out_offset = 1 if vertex == goal_idx else 0
+		in_flow = cp.sum([phi_vars[(in_idx,vertex)] for in_idx in in_idxs]) + in_offset
+		out_flow = cp.sum([phi_vars[(vertex,out_idx)] for out_idx in out_idxs]) + out_offset
+		constraints += [in_flow == out_flow]
+		constraints += [out_flow <= 1]
+		# print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
+		# print(str(vertex) + "\tin: " + str(in_flow) + "\tout: " + str(out_flow))
+		v_in_flows[vertex] = in_flow
+		v_out_flows[vertex] = out_flow
+
+	# Spatial Conservation of Flow
+	# (GCS 1, Page 15, EQ 21d)
+	for vertex in range(len(adj_mat)-2): # Ignore the start and goal vertices
+		in_idxs = np.nonzero(adj_mat[:,vertex])[0]
+		out_idxs = np.nonzero(adj_mat[vertex,:])[0]
+		in_flow = cp.sum([z_vars[(in_idx,vertex)] for in_idx in in_idxs], axis=0)
+		out_flow = cp.sum([y_vars[(vertex,out_idx)] for out_idx in out_idxs], axis=0)
+		constraints += [in_flow == out_flow]
+		# print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
+
+	# Convex Relaxation of Integer Constraints
+	for edge in phi_vars.keys():
+		phi = phi_vars[edge]
+		constraints += [phi >= 0]
+		constraints += [phi <= 1]
+
+	# Construct and solve the convex relaxation
+	prob = cp.Problem(cp.Minimize(objective), constraints)
+	prob.solve()
+
+	if prob.value == np.inf:
+		print("Problem is infeasible!")
+		exit(1)
+
+	print("Final edge flows:")
+	for edge in phi_vars.keys():
+		print(str(edge) + "\t" + str(phi_vars[edge].value))
+
+	print("Final vertex flows:")
+	for vertex in range(len(adj_mat)):
+		print(str(vertex) + "\tin: " + str(v_in_flows[vertex].value) + "\tout: " + str(v_out_flows[vertex].value))
+
+	# Reconstruct the x variables
+	x = np.zeros((len(adj_mat),2))
+	out_idxs = np.nonzero(adj_mat[start_idx,:])[0]
+	xs = np.sum([y_vars[(start_idx,out_idx)].value for out_idx in out_idxs], axis=0)
+	x[-2] = xs
+	in_idxs = np.nonzero(adj_mat[:,goal_idx])[0]
+	xt = np.sum([z_vars[(in_idx,goal_idx)].value for in_idx in in_idxs], axis=0)
+	x[-1] = xt
+
+	for v in range(len(adj_mat)-2):
+		out_idxs = np.nonzero(adj_mat[v,:])[0]
+		x[v] = np.sum([y_vars[(v,out_idx)].value for out_idx in out_idxs], axis=0)
+
+	print("Final vertex positions")
+	for v in range(len(x)):
+		print(str(v) + "\t" + str(x[v]))
+
+	return x # TODO: Remove
+
+	# for edge in y_vars.keys():
+	# 	print(str(edge) + "\t" + str(y_vars[edge].value) + "\t" + str(z_vars[edge].value) + "\t" + str(phi_vars[edge].value))
+
+	#
+	shortest_path = []
+	return shortest_path
 
 region_tuples = [solve_iris_region(seed_point) for seed_point in iris_seed_points]
 halfspace_reps = [compute_halfspace(A, b, d) for A, b, _, d, in region_tuples]
 
 adj_mat = construct_gcs_adj_mat(halfspace_reps)
-gcs_regions = construct_gcs_regions(adj_mat, halfspace_reps)
+# gcs_regions = construct_gcs_regions(adj_mat, halfspace_reps)
+shortest_path = solve_gcs_rounding(adj_mat, halfspace_reps)
 
-draw_output([], halfspace_reps, adj_mat)
+draw_output(shortest_path, halfspace_reps, adj_mat)
