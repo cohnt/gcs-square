@@ -218,6 +218,20 @@ def construct_overlap_adj_mat(regions):
 		adj_mat[i,goal_idx] = adj_mat[goal_idx,i] = point_inside_region(goal, regions[i])
 		for j in range(i+1, len(regions)):
 			adj_mat[i,j] = adj_mat[j,i] = do_regions_intersect(regions[i], regions[j])
+	# Remove extra edges between the start/goal point and other containing regions
+	# This is a hacky way to avoid weird issues with having multiple "start" or "goal" regions
+	# in the conjugate graph
+	zero_it_start = False
+	zero_it_goal = False
+	for i in range(adj_mat.shape[0]):
+		if zero_it_start:
+			adj_mat[start_idx,i] = adj_mat[i,start_idx] = 0
+		if adj_mat[start_idx,i]:
+			zero_it_start = True
+		if zero_it_goal:
+			adj_mat[goal_idx,i] = adj_mat[i,goal_idx] = 0
+		if adj_mat[goal_idx,i]:
+			zero_it_goal = True
 	return adj_mat
 
 def compute_halfspace_intersection(region1, region2):
