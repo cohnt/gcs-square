@@ -238,23 +238,6 @@ def create_gcs_region(region1, region2):
 	new_halfspace = HalfspaceIntersection(halfspaces, x, incremental=False)
 	return new_halfspace # Maybe also return x?
 
-# def construct_gcs_regions(adj_mat, halfspace_reps):
-# 	gcs_regions = dict()
-# 	for i in range(len(halfspace_reps)):
-# 		for j in range(i, len(halfspace_reps)):
-# 			if adj_mat[i,j]:
-# 				gcs_regions[(i,j)] = gcs_regions[(j,i)] = create_gcs_region(halfspace_reps[i], halfspace_reps[j])
-
-# 	# Create gcs regions for start and end points
-# 	start_idx = len(adj_mat) - 2
-# 	start_containing_idx = np.nonzero(adj_mat[start_idx])[0][0]
-# 	gcs_regions[(start_idx,start_containing_idx)] = gcs_regions[(start_containing_idx,start_idx)] = create_gcs_region(halfspace_reps[start_containing_idx], halfspace_reps[start_containing_idx])
-# 	goal_idx = len(adj_mat) - 1
-# 	goal_containing_idx = np.nonzero(adj_mat[goal_idx])[0][0]
-# 	gcs_regions[(goal_idx,goal_containing_idx)] = gcs_regions[(goal_containing_idx,goal_idx)] = create_gcs_region(halfspace_reps[goal_containing_idx], halfspace_reps[goal_containing_idx])
-
-# 	return gcs_regions
-
 def solve_gcs_rounding(adj_mat, gcs_regions):
 	# Set up dictionaries to hold all of the variables in an organized fashion
 	y_vars = dict() # One R^2 variable for each edge (u,v)
@@ -395,7 +378,7 @@ def solve_gcs_rounding(adj_mat, gcs_regions):
 	for v in range(len(x)):
 		print(str(v) + "\t" + str(x[v]))
 
-	return x # TODO: Remove
+	return [x[4], x[0], x[1], x[3], x[5]] # TODO: Remove
 
 	# for edge in y_vars.keys():
 	# 	print(str(edge) + "\t" + str(y_vars[edge].value) + "\t" + str(z_vars[edge].value) + "\t" + str(phi_vars[edge].value))
@@ -408,7 +391,6 @@ region_tuples = [solve_iris_region(seed_point) for seed_point in iris_seed_point
 halfspace_reps = [compute_halfspace(A, b, d) for A, b, _, d, in region_tuples]
 
 adj_mat = construct_gcs_adj_mat(halfspace_reps)
-# gcs_regions = construct_gcs_regions(adj_mat, halfspace_reps)
 shortest_path = solve_gcs_rounding(adj_mat, halfspace_reps)
 
 draw_output(shortest_path, halfspace_reps, adj_mat)
