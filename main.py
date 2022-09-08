@@ -35,7 +35,8 @@ iris_seed_points = np.array([
 tolerance = 0.00001
 max_iters = 10
 
-def draw_output(shortest_path, halfspace_reps, adj_mat):
+# def draw_output(shortest_path, halfspace_reps, adj_mat):
+def draw_output(shortest_path, gcs_regions, region_points, gcs_regions_idx_dict, conjugate_graph):
 	fig, ax = plt.subplots()
 	ax.set_xlim(world_bounds[0])
 	ax.set_ylim(world_bounds[1])
@@ -44,29 +45,23 @@ def draw_output(shortest_path, halfspace_reps, adj_mat):
 	ax.add_patch(Circle(start, radius=0.1, color="green"))
 	ax.add_patch(Circle(goal, radius=0.1, color="blue"))
 
-	ax.scatter(iris_seed_points[:,0], iris_seed_points[:,1], color="black")
+	ax.scatter(region_points[:,0], region_points[:,1], color="black")
 
 	if len(shortest_path) > 0:
 		shortest_path = np.asarray(shortest_path)
-		ax.plot(np.asarray(shortest_path)[:,0], np.asarray(shortest_path)[:,1])
+		ax.plot(shortest_path[:,0], shortest_path[:,1])
+		ax.scatter(shortest_path[:,0], shortest_path[:,1])
 
-	for idx, halfspace_rep in enumerate(halfspace_reps):
+	for idx, halfspace_rep in enumerate(gcs_regions):
+		if halfspace_rep == "start" or halfspace_rep == "goal":
+			continue
 		color = plt.get_cmap("Set3")(float(idx) / 12.)
 		draw_halfspace_rep(ax, halfspace_rep, color=color)
 
-	start_idx = len(halfspace_reps)
-	goal_idx = len(halfspace_reps) + 1
-	for i in range(len(halfspace_reps)):
-		for j in range(i, len(halfspace_reps)):
-			if adj_mat[i,j]:
-				ax.plot(iris_seed_points[[i,j],0], iris_seed_points[[i,j],1], color="black", linestyle="dashed")
-		if adj_mat[i,start_idx]:
-			ax.plot([iris_seed_points[i,0],start[0]], [iris_seed_points[i,1],start[1]], color="black", linestyle="dashed")
-		if adj_mat[i,goal_idx]:
-			ax.plot([iris_seed_points[i,0],goal[0]], [iris_seed_points[i,1],goal[1]], color="black", linestyle="dashed")
-		ax.text(iris_seed_points[i,0]-.2, iris_seed_points[i,1]+.1, str(i))
-	ax.text(start[0]-.2, start[1]+.1, str(start_idx))
-	ax.text(goal[0]-.2, goal[1]+.1, str(goal_idx))
+	for i in range(conjugate_graph.shape[0]):
+		for j in range(i, conjugate_graph.shape[1]):
+			if conjugate_graph[i,j]:
+				ax.plot(region_points[[i,j],0], region_points[[i,j],1], color="black", linestyle="dashed")
 		
 	ax.set_aspect("equal")
 	plt.show()
@@ -212,7 +207,7 @@ def edge_edge_intersection(edge1, edge2):
 	l2 = LineString(edge2)
 	return not l1.intersection(l2).is_empty
 
-def construct_gcs_adj_mat(regions):
+def construct_overlap_adj_mat(regions):
 	foo = 2 + len(region_tuples)
 	adj_mat = np.zeros((foo, foo))
 	start_idx = len(regions)
@@ -224,7 +219,7 @@ def construct_gcs_adj_mat(regions):
 			adj_mat[i,j] = adj_mat[j,i] = do_regions_intersect(regions[i], regions[j])
 	return adj_mat
 
-def create_gcs_region(region1, region2):
+def compute_halfspace_intersection(region1, region2):
 	# See: https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.HalfspaceIntersection.html
 	halfspaces = np.vstack((region1.halfspaces, region2.halfspaces))
 	norm_vector = np.reshape(np.linalg.norm(halfspaces[:, :-1], axis=1), (halfspaces.shape[0], 1))
@@ -236,7 +231,48 @@ def create_gcs_region(region1, region2):
 	x = res.x[:-1]
 	y = res.x[-1]
 	new_halfspace = HalfspaceIntersection(halfspaces, x, incremental=False)
-	return new_halfspace # Maybe also return x?
+	return new_halfspace, x
+
+def construct_gcs_regions(overlap_adj_mat, halfspace_reps):
+	gcs_regions_idx_dict = dict()
+	gcs_regions = []
+	region_points = []
+	start_idx = len(overlap_adj_mat) - 2
+	goal_idx = len(overlap_adj_mat) - 1
+	for i in range(overlap_adj_mat.shape[0]):
+		for j in range(i, overlap_adj_mat.shape[1]):
+			if overlap_adj_mat[i,j]:
+				gcs_regions_idx_dict[(i,j)] = gcs_regions_idx_dict[(j,i)] = len(gcs_regions)
+				if i == start_idx or j == start_idx:
+					new_region = "start"
+					point = start
+				elif i == goal_idx or j == goal_idx:
+					new_region = "goal"
+					point = goal
+				else:
+					new_region, point = compute_halfspace_intersection(halfspace_reps[i], halfspace_reps[j])
+				gcs_regions.append(new_region)
+				region_points.append(point)
+	region_points = np.array(region_points)
+
+	# Construct conjugate graph
+	num_regions = len(gcs_regions)
+	conjugate_graph = np.zeros((num_regions, num_regions))
+	for i in range(overlap_adj_mat.shape[0]):
+		for j in range(overlap_adj_mat.shape[1]):
+			if overlap_adj_mat[i,j]:
+				for k in range(overlap_adj_mat.shape[0]):
+					if k == i or k == j:
+						continue
+					e1 = gcs_regions_idx_dict[(i,j)]
+					if overlap_adj_mat[i,k]:
+						e2 = gcs_regions_idx_dict[(i,k)]
+						conjugate_graph[e1,e2] = conjugate_graph[e2,e1] = 1
+					if overlap_adj_mat[j,k]:
+						e2 = gcs_regions_idx_dict[(j,k)]
+						conjugate_graph[e1,e2] = conjugate_graph[e2,e1] = 1
+
+	return gcs_regions, region_points, gcs_regions_idx_dict, conjugate_graph
 
 def solve_gcs_rounding(adj_mat, gcs_regions):
 	# Set up dictionaries to hold all of the variables in an organized fashion
@@ -338,6 +374,7 @@ def solve_gcs_rounding(adj_mat, gcs_regions):
 		out_flow = cp.sum([y_vars[(vertex,out_idx)] for out_idx in out_idxs], axis=0)
 		constraints += [in_flow == out_flow]
 		# print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
+		# print(str(vertex) + "\tin: " + str(in_flow) + "\tout: " + str(out_flow))
 
 	# Convex Relaxation of Integer Constraints
 	for edge in phi_vars.keys():
@@ -390,7 +427,9 @@ def solve_gcs_rounding(adj_mat, gcs_regions):
 region_tuples = [solve_iris_region(seed_point) for seed_point in iris_seed_points]
 halfspace_reps = [compute_halfspace(A, b, d) for A, b, _, d, in region_tuples]
 
-adj_mat = construct_gcs_adj_mat(halfspace_reps)
-shortest_path = solve_gcs_rounding(adj_mat, halfspace_reps)
+overlap_adj_mat = construct_overlap_adj_mat(halfspace_reps)
+gcs_regions, region_points, gcs_regions_idx_dict, conjugate_graph = construct_gcs_regions(overlap_adj_mat, halfspace_reps)
+# shortest_path = solve_gcs_rounding(conjugate_graph, gcs_regions)
 
-draw_output(shortest_path, halfspace_reps, adj_mat)
+shortest_path = []
+draw_output(shortest_path, gcs_regions, region_points, gcs_regions_idx_dict, conjugate_graph)
