@@ -365,7 +365,7 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 	# (GCS 1, Page 15, EQ 21c)
 	v_in_flows = dict()
 	v_out_flows = dict()
-	print("Ordinary Conservation of Flow")
+	# print("Ordinary Conservation of Flow")
 	for vertex in range(len(adj_mat)):
 		# By convention, row denotes source vertex and column denotes target vertex for directed edges
 		in_idxs = np.nonzero(adj_mat[:,vertex])[0]
@@ -376,14 +376,14 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 		out_flow = cp.sum([phi_vars[(vertex,out_idx)] for out_idx in out_idxs]) + out_offset
 		constraints += [in_flow == out_flow]
 		constraints += [out_flow <= 1]
-		print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
-		print(str(vertex) + "\tin: " + str(in_flow) + "\tout: " + str(out_flow))
+		# print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
+		# print(str(vertex) + "\tin: " + str(in_flow) + "\tout: " + str(out_flow))
 		v_in_flows[vertex] = in_flow
 		v_out_flows[vertex] = out_flow
 
 	# Spatial Conservation of Flow
 	# (GCS 1, Page 15, EQ 21d)
-	print("Spatial Conservation of Flow")
+	# print("Spatial Conservation of Flow")
 	for vertex in range(len(adj_mat)): # Ignore the start and goal vertices
 		if vertex == start_idx or vertex == goal_idx:
 			continue
@@ -392,8 +392,8 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 		in_flow = cp.sum([z_vars[(in_idx,vertex)] for in_idx in in_idxs], axis=0)
 		out_flow = cp.sum([y_vars[(vertex,out_idx)] for out_idx in out_idxs], axis=0)
 		constraints += [in_flow == out_flow]
-		print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
-		print(str(vertex) + "\tin: " + str(in_flow) + "\tout: " + str(out_flow))
+		# print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
+		# print(str(vertex) + "\tin: " + str(in_flow) + "\tout: " + str(out_flow))
 
 	# Convex Relaxation of Integer Constraints
 	for edge in phi_vars.keys():
@@ -436,18 +436,25 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 
 	# Deterministic rounded depth-first search
 	# (TODO: Add in the randomized version?)
-	# shortest_path_idx = []
-	# visited_idx = set()
-	# curr_idx = start_idx
-	# while curr_idx != goal_idx:
-	# 	shortest_path.append(curr_idx)
-	# 	visited_idx
+	shortest_path_idx = []
+	visited_idx = set()
+	shortest_path_idx.append(start_idx)
+	visited_idx.add(start_idx)
+	while shortest_path_idx[-1] != goal_idx:
+		curr_idx = shortest_path_idx[-1]
+		adj_verts = np.nonzero(conjugate_graph[curr_idx])[0]
+		adj_weights = np.array([phi_vars[(curr_idx,adj_vert)].value for adj_vert in adj_verts])
+		adj_verts_sorted = adj_verts[np.argsort(-adj_weights)]
+		adj_verts_open = np.array([adj_vert not in visited_idx for adj_vert in adj_verts_sorted])
+		if np.sum(adj_verts_open) == 0:
+			print("Error, no path found!")
+			print("You should never reach this point!")
+			exit(1)
+		next_idx = adj_verts_sorted[np.nonzero(adj_verts_open)[0][0]]
+		shortest_path_idx.append(next_idx)
+		visited_idx.add(next_idx)
 
-	# TODO: REMOVE
-	return [x[2], x[0], x[3], x[5]]
-
-	#
-	shortest_path = []
+	shortest_path = [x[idx] for idx in shortest_path_idx]
 	return shortest_path
 
 region_tuples = [solve_iris_region(seed_point) for seed_point in iris_seed_points]
