@@ -3,7 +3,8 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon, Circle
 import cvxpy as cp
 from scipy.spatial import HalfspaceIntersection
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point
+from shapely.geometry import Polygon as SPolygon
 from scipy.optimize import linprog
 
 start = np.array([0.5, 0.1])
@@ -35,10 +36,9 @@ iris_seed_points = np.array([
 tolerance = 0.00001
 max_iters = 10
 
-np.random.seed(10)
-iris_seed_points = np.random.rand(4, 2)
-iris_seed_points[:,0] = iris_seed_points[:,0] * world_bounds[0,1]
-iris_seed_points[:,1] = iris_seed_points[:,1] * world_bounds[1,1]
+# Can also use this to generate random iris points
+n_iris_points = 5
+use_random_seed_points = True
 
 def draw_output_iris(iris_regions):
 	fig, ax = plt.subplots()
@@ -214,6 +214,16 @@ def solve_iris_region(seed_point):
 
 	# print("Done")
 	return As[-1], bs[-1], Cs[-1], ds[-1]
+
+def make_random_iris_seed_points(n_points, random_seed=0):
+	np.random.seed(random_seed)
+	iris_seed_points = []
+	polygon = SPolygon(obstacle)
+	while len(iris_seed_points) < n_points:
+		point = np.multiply(np.random.rand(2), world_bounds[:,1])
+		if not polygon.contains(Point(point[0], point[1])):
+			iris_seed_points.append(point)
+	return np.array(iris_seed_points)
 
 def point_inside_region(point, region):
 	#
@@ -434,13 +444,13 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 		print("Problem is infeasible!")
 		return []
 
-	# print("Final edge flows:")
-	# for edge in phi_vars.keys():
-	# 	print(str(edge) + "\t" + str(phi_vars[edge].value))
+	print("Final edge flows:")
+	for edge in phi_vars.keys():
+		print(str(edge) + "\t" + str(phi_vars[edge].value))
 
-	# print("Final vertex flows:")
-	# for vertex in range(len(adj_mat)):
-	# 	print(str(vertex) + "\tin: " + str(v_in_flows[vertex].value) + "\tout: " + str(v_out_flows[vertex].value))
+	print("Final vertex flows:")
+	for vertex in range(len(adj_mat)):
+		print(str(vertex) + "\tin: " + str(v_in_flows[vertex].value) + "\tout: " + str(v_out_flows[vertex].value))
 
 	# Reconstruct the x variables
 	x = np.zeros((len(adj_mat),2))
@@ -481,6 +491,9 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 
 	shortest_path = [x[idx] for idx in shortest_path_idx]
 	return shortest_path
+
+if use_random_seed_points:
+	iris_seed_points = make_random_iris_seed_points(n_iris_points, random_seed=10)
 
 print("Constructing IRIS regions")
 region_tuples = [solve_iris_region(seed_point) for seed_point in iris_seed_points]
