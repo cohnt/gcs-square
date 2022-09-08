@@ -37,8 +37,8 @@ tolerance = 0.00001
 max_iters = 10
 
 # Can also use this to generate random iris points
-n_iris_points = 5
-use_random_seed_points = True
+n_iris_points = 4
+use_random_seed_points = False
 
 def draw_output_iris(iris_regions):
 	fig, ax = plt.subplots()
@@ -59,7 +59,7 @@ def draw_output_iris(iris_regions):
 
 	ax.set_aspect("equal")
 	ax.set_title("IRIS Regions")
-	plt.show()
+	# plt.show()
 
 def draw_output_gcs(shortest_path, gcs_regions, region_points, conjugate_graph):
 	fig, ax = plt.subplots()
@@ -444,13 +444,13 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 		print("Problem is infeasible!")
 		return []
 
-	print("Final edge flows:")
-	for edge in phi_vars.keys():
-		print(str(edge) + "\t" + str(phi_vars[edge].value))
+	# print("Final edge flows:")
+	# for edge in phi_vars.keys():
+	# 	print(str(edge) + "\t" + str(phi_vars[edge].value))
 
-	print("Final vertex flows:")
-	for vertex in range(len(adj_mat)):
-		print(str(vertex) + "\tin: " + str(v_in_flows[vertex].value) + "\tout: " + str(v_out_flows[vertex].value))
+	# print("Final vertex flows:")
+	# for vertex in range(len(adj_mat)):
+	# 	print(str(vertex) + "\tin: " + str(v_in_flows[vertex].value) + "\tout: " + str(v_out_flows[vertex].value))
 
 	# Reconstruct the x variables
 	x = np.zeros((len(adj_mat),2))
