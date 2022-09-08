@@ -36,7 +36,7 @@ tolerance = 0.00001
 max_iters = 10
 
 # def draw_output(shortest_path, halfspace_reps, adj_mat):
-def draw_output(shortest_path, gcs_regions, region_points, gcs_regions_idx_dict, conjugate_graph):
+def draw_output(shortest_path, gcs_regions, region_points, conjugate_graph):
 	fig, ax = plt.subplots()
 	ax.set_xlim(world_bounds[0])
 	ax.set_ylim(world_bounds[1])
@@ -62,6 +62,7 @@ def draw_output(shortest_path, gcs_regions, region_points, gcs_regions_idx_dict,
 		for j in range(i, conjugate_graph.shape[1]):
 			if conjugate_graph[i,j]:
 				ax.plot(region_points[[i,j],0], region_points[[i,j],1], color="black", linestyle="dashed")
+		ax.text(region_points[i,0]-.2, region_points[i,1], str(i))
 		
 	ax.set_aspect("equal")
 	plt.show()
@@ -274,15 +275,15 @@ def construct_gcs_regions(overlap_adj_mat, halfspace_reps):
 
 	return gcs_regions, region_points, gcs_regions_idx_dict, conjugate_graph
 
-def solve_gcs_rounding(adj_mat, gcs_regions):
+def solve_gcs_rounding(gcs_regions, adj_mat):
 	# Set up dictionaries to hold all of the variables in an organized fashion
 	y_vars = dict() # One R^2 variable for each edge (u,v)
 	z_vars = dict() # One R^2 variable for each edge (u,v)
 	phi_vars = dict() # One [0,1] variable for each edge (u,v)
 	l_vars = dict() # One non-negative slack variable for each edge (u,v)
 
-	start_idx = len(adj_mat) - 2
-	goal_idx = len(adj_mat) - 1
+	start_idx = gcs_regions.index("start")
+	goal_idx = gcs_regions.index("goal")
 
 	# Create all of the decision variables
 	for i in range(len(adj_mat)):
@@ -350,6 +351,7 @@ def solve_gcs_rounding(adj_mat, gcs_regions):
 	# (GCS 1, Page 15, EQ 21c)
 	v_in_flows = dict()
 	v_out_flows = dict()
+	print("Ordinary Conservation of Flow")
 	for vertex in range(len(adj_mat)):
 		# By convention, row denotes source vertex and column denotes target vertex for directed edges
 		in_idxs = np.nonzero(adj_mat[:,vertex])[0]
@@ -360,21 +362,24 @@ def solve_gcs_rounding(adj_mat, gcs_regions):
 		out_flow = cp.sum([phi_vars[(vertex,out_idx)] for out_idx in out_idxs]) + out_offset
 		constraints += [in_flow == out_flow]
 		constraints += [out_flow <= 1]
-		# print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
-		# print(str(vertex) + "\tin: " + str(in_flow) + "\tout: " + str(out_flow))
+		print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
+		print(str(vertex) + "\tin: " + str(in_flow) + "\tout: " + str(out_flow))
 		v_in_flows[vertex] = in_flow
 		v_out_flows[vertex] = out_flow
 
 	# Spatial Conservation of Flow
 	# (GCS 1, Page 15, EQ 21d)
-	for vertex in range(len(adj_mat)-2): # Ignore the start and goal vertices
+	print("Spatial Conservation of Flow")
+	for vertex in range(len(adj_mat)): # Ignore the start and goal vertices
+		if vertex == start_idx or vertex == goal_idx:
+			continue
 		in_idxs = np.nonzero(adj_mat[:,vertex])[0]
 		out_idxs = np.nonzero(adj_mat[vertex,:])[0]
 		in_flow = cp.sum([z_vars[(in_idx,vertex)] for in_idx in in_idxs], axis=0)
 		out_flow = cp.sum([y_vars[(vertex,out_idx)] for out_idx in out_idxs], axis=0)
 		constraints += [in_flow == out_flow]
-		# print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
-		# print(str(vertex) + "\tin: " + str(in_flow) + "\tout: " + str(out_flow))
+		print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
+		print(str(vertex) + "\tin: " + str(in_flow) + "\tout: " + str(out_flow))
 
 	# Convex Relaxation of Integer Constraints
 	for edge in phi_vars.keys():
@@ -388,7 +393,7 @@ def solve_gcs_rounding(adj_mat, gcs_regions):
 
 	if prob.value == np.inf:
 		print("Problem is infeasible!")
-		exit(1)
+		return []
 
 	print("Final edge flows:")
 	for edge in phi_vars.keys():
@@ -411,14 +416,21 @@ def solve_gcs_rounding(adj_mat, gcs_regions):
 		out_idxs = np.nonzero(adj_mat[v,:])[0]
 		x[v] = np.sum([y_vars[(v,out_idx)].value for out_idx in out_idxs], axis=0)
 
-	print("Final vertex positions")
-	for v in range(len(x)):
-		print(str(v) + "\t" + str(x[v]))
+	# print("Final vertex positions")
+	# for v in range(len(x)):
+	# 	print(str(v) + "\t" + str(x[v]))
 
-	return [x[4], x[0], x[1], x[3], x[5]] # TODO: Remove
+	# Deterministic rounded depth-first search
+	# (TODO: Add in the randomized version?)
+	# shortest_path_idx = []
+	# visited_idx = set()
+	# curr_idx = start_idx
+	# while curr_idx != goal_idx:
+	# 	shortest_path.append(curr_idx)
+	# 	visited_idx
 
-	# for edge in y_vars.keys():
-	# 	print(str(edge) + "\t" + str(y_vars[edge].value) + "\t" + str(z_vars[edge].value) + "\t" + str(phi_vars[edge].value))
+	# TODO: REMOVE
+	return [x[2], x[0], x[3], x[5]]
 
 	#
 	shortest_path = []
@@ -429,7 +441,6 @@ halfspace_reps = [compute_halfspace(A, b, d) for A, b, _, d, in region_tuples]
 
 overlap_adj_mat = construct_overlap_adj_mat(halfspace_reps)
 gcs_regions, region_points, gcs_regions_idx_dict, conjugate_graph = construct_gcs_regions(overlap_adj_mat, halfspace_reps)
-# shortest_path = solve_gcs_rounding(conjugate_graph, gcs_regions)
+shortest_path = solve_gcs_rounding(gcs_regions, conjugate_graph)
 
-shortest_path = []
-draw_output(shortest_path, gcs_regions, region_points, gcs_regions_idx_dict, conjugate_graph)
+draw_output(shortest_path, gcs_regions, region_points, conjugate_graph)
