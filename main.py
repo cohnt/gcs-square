@@ -37,8 +37,11 @@ tolerance = 0.00001
 max_iters = 10
 
 # Can also use this to generate random iris points
-n_iris_points = 4
+n_iris_points = 6
 use_random_seed_points = False
+
+# Whether to solve the integer program or the convex relaxation
+solve_integer = False
 
 def draw_output_iris(iris_regions):
 	fig, ax = plt.subplots()
@@ -335,7 +338,10 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 			if adj_mat[i,j]:
 				y_vars[(i,j)] = cp.Variable(2)
 				z_vars[(i,j)] = cp.Variable(2)
-				phi_vars[(i,j)] = cp.Variable()
+				if solve_integer:
+					phi_vars[(i,j)] = cp.Variable(integer=True)
+				else:
+					phi_vars[(i,j)] = cp.Variable()
 				l_vars[(i,j)] = cp.Variable()
 
 	constraints = []
