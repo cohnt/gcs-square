@@ -1,0 +1,3 @@
+Implementation of the GCS algorithm from [*Shortest Paths in Graphs of Convex Sets*](https://arxiv.org/abs/2101.11565) (Tobia Marcucci, Jack Umenberger, Pablo A. Parrilo, and Russ Tedrake) in a simple world with a square obstacle.
+
+Blog post with more details coming soon...
