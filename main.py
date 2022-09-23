@@ -479,7 +479,7 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 	visited_idx.add(start_idx)
 	while shortest_path_idx[-1] != goal_idx:
 		curr_idx = shortest_path_idx[-1]
-		adj_verts = np.nonzero(conjugate_graph[curr_idx])[0]
+		adj_verts = np.nonzero(adj_mat[curr_idx])[0]
 		adj_weights = np.array([phi_vars[(curr_idx,adj_vert)].value for adj_vert in adj_verts])
 		adj_verts_sorted = adj_verts[np.argsort(-adj_weights)]
 		adj_verts_open = np.array([adj_vert not in visited_idx for adj_vert in adj_verts_sorted])
