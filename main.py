@@ -457,6 +457,7 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 	options.SetOption(pydrake.solvers.CommonSolverOption.kPrintToConsole, 1)
 	# options.SetOption(solver.id(), "TimeLimit", 30.)
 	options.SetOption(solver.id(), "MIPGap", 0.1) # 10%
+	options.SetOption(solver.id(), "Threads", 20) # May need to adjust this for your device
 	result = solver.Solve(prog, solver_options=options)
 
 	if not result.is_success():
