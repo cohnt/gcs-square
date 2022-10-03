@@ -6,6 +6,8 @@ from scipy.spatial import HalfspaceIntersection
 from shapely.geometry import LineString, Point
 from shapely.geometry import Polygon as SPolygon
 from scipy.optimize import linprog
+import pydrake.solvers
+from pydrake.solvers import MathematicalProgram, Solve, GurobiSolver
 
 start = np.array([0.5, 0.1])
 goal = np.array([3.9, 3.9])
@@ -37,11 +39,11 @@ tolerance = 0.00001
 max_iters = 10
 
 # Can also use this to generate random iris points
-n_iris_points = 6
-use_random_seed_points = False
+n_iris_points = 10
+use_random_seed_points = True
 
 # Whether to solve the integer program or the convex relaxation
-solve_integer = False
+solve_integer = True
 
 def draw_output_iris(iris_regions):
 	fig, ax = plt.subplots()
@@ -332,31 +334,30 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 	start_idx = gcs_regions.index("start")
 	goal_idx = gcs_regions.index("goal")
 
+	prog = MathematicalProgram()
+
 	# Create all of the decision variables
 	for i in range(len(adj_mat)):
 		for j in range(len(adj_mat)):
 			if adj_mat[i,j]:
-				y_vars[(i,j)] = cp.Variable(2)
-				z_vars[(i,j)] = cp.Variable(2)
+				y_vars[(i,j)] = prog.NewContinuousVariables(2, "[y %d %d]" % (i,j))
+				z_vars[(i,j)] = prog.NewContinuousVariables(2, "[z %d %d]" % (i,j))
 				if solve_integer:
-					phi_vars[(i,j)] = cp.Variable(integer=True)
+					phi_vars[(i,j)] = prog.NewBinaryVariables(1, "[phi %d %d]" % (i,j))
 				else:
-					phi_vars[(i,j)] = cp.Variable()
-				l_vars[(i,j)] = cp.Variable()
-
-	constraints = []
-	objective = 0
+					phi_vars[(i,j)] = prog.NewContinuousVariables(1, "[phi %d %d]" % (i,j))
+				l_vars[(i,j)] = prog.NewContinuousVariables(1, "[l %d %d]" % (i,j))
 
 	# Construct the objective function
 	for edge, l_var in l_vars.items():
 		#
-		objective += l_var # The l slack variables are used with the Euclidean perspective function (GCS 1, Page 16)
+		prog.AddLinearCost(np.ones(1), l_var) # The l slack variables are used with the Euclidean perspective function (GCS 1, Page 16)
 
 	# Slack variable constraints
 	# (GCS 1, Page 16)
 	for l_var in l_vars.values():
 		#
-		constraints += [l_var >= 0]
+		prog.AddLinearConstraint(l_var[0] >= 0)
 
 	# Second Order Cone Constraints
 	# (GCS 1, Page 16, EQ 23) *but using the norm, not the squared norm
@@ -365,8 +366,14 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 		z = z_vars[edge]
 		phi = phi_vars[edge]
 		l = l_vars[edge]
-		constraints += [cp.SOC(l, y-z)] # Note: the extra phi_e doesn't appear on the LHS, because the norm isn't squared
-		                                # I don't remember exactly why, but Mark says so, and I trust Mark
+
+		# print(np.array(y)-np.array(z))
+		# print()
+		# exit(0)
+		# prog.AddLorentzConeConstraint(l[0], np.dot(y-z,y-z))
+		diff = y - z
+		arr = np.hstack((l, diff)).reshape(-1,1)
+		prog.AddLorentzConeConstraint(arr)
 
 	# Set Membership Constraints
 	# (GCS 1, Page 15, EQ 21b)
@@ -378,24 +385,30 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 		# For all of these cases, use the singleton set special case
 		# (GCS 1, Page 17, 6.2.1)
 		if edge[0] == start_idx:
-			constraints += [y == phi * start]
+			expr = y - (phi * start)
+			prog.AddLinearEqualityConstraint(expr, np.zeros_like(expr))
 		elif edge[0] == goal_idx:
-			constraints += [y == phi * goal]
+			expr = y - (phi * goal)
+			prog.AddLinearEqualityConstraint(expr, np.zeros_like(expr))
 		else:
 			# General case (GCS 1, Page 18, 6.2.2)
 			A = gcs_regions[edge[0]].halfspaces[:,:-1]
 			b = -gcs_regions[edge[0]].halfspaces[:,-1]
-			constraints += [A @ y <= b * phi]
+			expr = (A @ y) - (b * phi)
+			prog.AddLinearConstraint(expr, lb=np.full(expr.shape, -np.inf), ub=np.full(expr.shape, 0))
 
 		if edge[1] == start_idx:
-			constraints += [z == phi * start]
+			expr = z - (phi * start)
+			prog.AddLinearEqualityConstraint(expr, np.zeros_like(expr))
 		elif edge[1] == goal_idx:
-			constraints += [z == phi * goal]
+			expr = z - (phi * goal)
+			prog.AddLinearEqualityConstraint(expr, np.zeros_like(expr))
 		else:
 			# General case (GCS 1, Page 18, 6.2.2)
 			A = gcs_regions[edge[1]].halfspaces[:,:-1]
 			b = -gcs_regions[edge[1]].halfspaces[:,-1]
-			constraints += [A @ z <= b * phi]
+			expr = (A @ z) - (b * phi)
+			prog.AddLinearConstraint(expr, lb=np.full(expr.shape, -np.inf), ub=np.full(expr.shape, 0))
 
 	# Regular Conservation of Flow
 	# (GCS 1, Page 15, EQ 21c)
@@ -410,8 +423,8 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 		out_offset = 1 if vertex == goal_idx else 0
 		in_flow = cp.sum([phi_vars[(in_idx,vertex)] for in_idx in in_idxs]) + in_offset
 		out_flow = cp.sum([phi_vars[(vertex,out_idx)] for out_idx in out_idxs]) + out_offset
-		constraints += [in_flow == out_flow]
-		constraints += [out_flow <= 1]
+		prog.AddLinearEqualityConstraint(in_flow - out_flow, np.zeros_like(in_flow))
+		prog.AddLinearConstraint(out_flow, lb=np.full(out_flow.shape, -np.inf), ub=np.full(out_flow.shape, 1))
 		# print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
 		# print(str(vertex) + "\tin: " + str(in_flow) + "\tout: " + str(out_flow))
 		v_in_flows[vertex] = in_flow
@@ -427,31 +440,30 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 		out_idxs = np.nonzero(adj_mat[vertex,:])[0]
 		in_flow = cp.sum([z_vars[(in_idx,vertex)] for in_idx in in_idxs], axis=0)
 		out_flow = cp.sum([y_vars[(vertex,out_idx)] for out_idx in out_idxs], axis=0)
-		constraints += [in_flow == out_flow]
+		prog.AddLinearEqualityConstraint(in_flow - out_flow, np.zeros_like(in_flow))
 		# print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
 		# print(str(vertex) + "\tin: " + str(in_flow) + "\tout: " + str(out_flow))
 
 	# Convex Relaxation of Integer Constraints
 	for edge in phi_vars.keys():
 		phi = phi_vars[edge]
-		constraints += [phi >= 0]
-		constraints += [phi <= 1]
+		prog.AddLinearConstraint(phi, lb=np.full(phi.shape, 0), ub=np.full(phi.shape, 1))
 
 	# Construct and solve the convex relaxation
-	prob = cp.Problem(cp.Minimize(objective), constraints)
-	prob.solve()
 
-	if prob.value == np.inf:
+	# result = Solve(prog)
+	solver = GurobiSolver()
+	options = pydrake.solvers.SolverOptions()
+	options.SetOption(pydrake.solvers.CommonSolverOption.kPrintToConsole, 1)
+	# options.SetOption(solver.id(), "TimeLimit", 30.)
+	options.SetOption(solver.id(), "MIPGap", 0.1) # 10%
+	result = solver.Solve(prog, solver_options=options)
+
+	if not result.is_success():
 		print("Problem is infeasible!")
 		return []
 
-	# print("Final edge flows:")
-	# for edge in phi_vars.keys():
-	# 	print(str(edge) + "\t" + str(phi_vars[edge].value))
-
-	# print("Final vertex flows:")
-	# for vertex in range(len(adj_mat)):
-	# 	print(str(vertex) + "\tin: " + str(v_in_flows[vertex].value) + "\tout: " + str(v_out_flows[vertex].value))
+	print("Done!")
 
 	# Reconstruct the x variables
 	x = np.zeros((len(adj_mat),2))
@@ -461,11 +473,11 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 		out_idxs = np.nonzero(adj_mat[v,:])[0]
 		in_idxs = np.nonzero(adj_mat[:,goal_idx])[0]
 		if v == start_idx:
-			x[v] = np.sum([y_vars[(start_idx,out_idx)].value for out_idx in out_idxs], axis=0)
+			x[v] = np.sum([result.GetSolution(y_vars[(start_idx,out_idx)]) for out_idx in out_idxs], axis=0)
 		elif v == goal_idx:
-			x[v] = np.sum([z_vars[(in_idx,goal_idx)].value for in_idx in in_idxs], axis=0)
+			x[v] = np.sum([result.GetSolution(z_vars[(in_idx,goal_idx)]) for in_idx in in_idxs], axis=0)
 		else:
-			x[v] = np.sum([y_vars[(v,out_idx)].value for out_idx in out_idxs], axis=0)
+			x[v] = np.sum([result.GetSolution(y_vars[(v,out_idx)]) for out_idx in out_idxs], axis=0)
 
 	# print("Final vertex positions")
 	# for v in range(len(x)):
@@ -480,7 +492,7 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 	while shortest_path_idx[-1] != goal_idx:
 		curr_idx = shortest_path_idx[-1]
 		adj_verts = np.nonzero(adj_mat[curr_idx])[0]
-		adj_weights = np.array([phi_vars[(curr_idx,adj_vert)].value for adj_vert in adj_verts])
+		adj_weights = np.array([result.GetSolution(phi_vars[(curr_idx,adj_vert)]) for adj_vert in adj_verts]).flatten()
 		adj_verts_sorted = adj_verts[np.argsort(-adj_weights)]
 		adj_verts_open = np.array([adj_vert not in visited_idx for adj_vert in adj_verts_sorted])
 		if np.sum(adj_verts_open) == 0:
@@ -491,6 +503,7 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 			visited_idx.add(next_idx)
 
 	shortest_path = [x[idx] for idx in shortest_path_idx]
+
 	return shortest_path
 
 if use_random_seed_points:
