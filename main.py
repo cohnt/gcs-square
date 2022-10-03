@@ -421,10 +421,10 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 		out_idxs = np.nonzero(adj_mat[vertex,:])[0]
 		in_offset = 1 if vertex == start_idx else 0
 		out_offset = 1 if vertex == goal_idx else 0
-		in_flow = cp.sum([phi_vars[(in_idx,vertex)] for in_idx in in_idxs]) + in_offset
-		out_flow = cp.sum([phi_vars[(vertex,out_idx)] for out_idx in out_idxs]) + out_offset
-		prog.AddLinearEqualityConstraint(in_flow - out_flow, np.zeros_like(in_flow))
-		prog.AddLinearConstraint(out_flow, lb=np.full(out_flow.shape, -np.inf), ub=np.full(out_flow.shape, 1))
+		in_flow = np.sum([phi_vars[(in_idx,vertex)] for in_idx in in_idxs]) + in_offset
+		out_flow = np.sum([phi_vars[(vertex,out_idx)] for out_idx in out_idxs]) + out_offset
+		prog.AddLinearEqualityConstraint(in_flow - out_flow, 0)
+		prog.AddLinearConstraint(out_flow, lb=-np.inf, ub=1)
 		# print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
 		# print(str(vertex) + "\tin: " + str(in_flow) + "\tout: " + str(out_flow))
 		v_in_flows[vertex] = in_flow
@@ -438,8 +438,8 @@ def solve_gcs_rounding(gcs_regions, adj_mat):
 			continue
 		in_idxs = np.nonzero(adj_mat[:,vertex])[0]
 		out_idxs = np.nonzero(adj_mat[vertex,:])[0]
-		in_flow = cp.sum([z_vars[(in_idx,vertex)] for in_idx in in_idxs], axis=0)
-		out_flow = cp.sum([y_vars[(vertex,out_idx)] for out_idx in out_idxs], axis=0)
+		in_flow = np.sum([z_vars[(in_idx,vertex)] for in_idx in in_idxs], axis=0)
+		out_flow = np.sum([y_vars[(vertex,out_idx)] for out_idx in out_idxs], axis=0)
 		prog.AddLinearEqualityConstraint(in_flow - out_flow, np.zeros_like(in_flow))
 		# print(str(vertex) + "\tin: " + str(in_idxs) + "\tout: " + str(out_idxs))
 		# print(str(vertex) + "\tin: " + str(in_flow) + "\tout: " + str(out_flow))
